@@ -15,12 +15,19 @@ import torch
 
 
 TRACKED_PACKAGES = (
+    "accelerate",
+    "bitsandbytes",
     "datasets",
     "huggingface-hub",
     "numpy",
+    "peft",
+    "pyyaml",
+    "safetensors",
     "scikit-learn",
+    "tensorboard",
     "torch",
     "transformers",
+    "trl",
 )
 
 

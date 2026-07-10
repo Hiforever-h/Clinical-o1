@@ -1,6 +1,6 @@
 # Clinical-o1 英文主线端到端实施计划
 
-> 状态：M0/M1 已完成，M2 待执行（2026-07-10）
+> 状态：M0/M1 已完成；M2 由项目负责人决定延期；M3 Stage 3 代码已实现，待 RTX 4090 实跑（2026-07-10）
 > 主模型：`Qwen/Qwen2.5-7B-Instruct`
 > 主路线：English SFT → PRM/Verifier → GRPO → DAPO → 全量评测与消融
 > 本文是后续实现和实验的唯一权威路线图；旧阶段文档与未验收代码已经删除。
@@ -26,10 +26,10 @@
 - 主评测：English MedQA-USMLE、MedMCQA、PubMedQA。
 - 现有中文 SFT 不再作为英文 GRPO 的初始化模型，只保留为历史实验和后续中文分支参考。
 
-### 2.2 `outputs/` 是不可删除区
+### 2.2 新实验产物隔离
 
-- 保留当前 `outputs/` 下全部 adapter、checkpoint、训练状态和评测结果；Finder `.DS_Store` 等系统元数据不属于实验产物。
-- 未到达对应里程碑的训练、评测和 RL 实现不提前保留；任何清理都不得删除或覆盖既有 `outputs/`。
+- 历史 `outputs/` 已按项目负责人授权删除；仓库不再声称保留旧中文训练结果。
+- `outputs/` 不提交 Git，但租卡实例释放前必须把通过门禁的关键 adapter、checkpoint、日志和评测结果同步到持久存储。
 - 新实验使用唯一运行目录：`outputs/<stage>/<run_id>/`。
 - `<run_id>` 统一为 `<model>_<data>_<method>_<seed>_<timestamp>`，禁止把不同实验写入同一目录。
 - 重构前先生成 `reports/artifact_inventory.json`，记录历史产物路径、大小、关键指标和 SHA256。
@@ -83,6 +83,7 @@ Clinical-o1/
 │   └── manifests/                  # revision、hash、行数、字段、污染报告
 ├── src/medical_grpo/
 │   ├── data/
+│   ├── sft/                         # Stage 3 配置、数据边界、模型与训练编排
 │   ├── eval/
 │   ├── rewards/
 │   ├── trainers/
@@ -97,14 +98,14 @@ Clinical-o1/
 │   ├── tables/
 │   ├── figures/
 │   └── artifact_inventory.json
-└── outputs/                        # 永久保留；历史产物不可删除
+└── outputs/                        # 本机生成；每个 run 使用唯一目录
 ```
 
 ## 5. Stage 0：冻结历史结果并重构工程骨架
 
 ### 工作项
 
-- [x] 清点 `outputs/`，生成 artifact inventory，并标记历史中文实验为 `legacy_zh`。
+- [x] 曾清点旧 `outputs/` 并生成 artifact inventory；随后按项目负责人明确授权删除旧产物，inventory 仅保留为历史记录。
 - [x] 建立运行环境、硬件和 Git 状态快照能力，后续由每个 run 目录复用。
 - [x] 使用 `pyproject.toml` 锁定当前 M0/M1 的最小依赖；训练依赖在到达对应里程碑并验证后加入。
 - [x] 重构为可安装包；M0/M1 新入口不再手工修改 `sys.path`。
@@ -113,7 +114,7 @@ Clinical-o1/
 
 ### 验收门槛
 
-- 历史 adapter、checkpoint、训练状态和评测结果的数量及 SHA256 不因代码重构而变化。
+- 旧产物删除前已经生成逐文件 SHA256 记录；删除行为有项目负责人明确授权。
 - 全部单元测试通过，Ruff 无错误。
 - 数据准备、SFT/RL 数据合同和评测答案映射 dry-run 能在无 CUDA 环境运行；Reward dry-run 在 M4 实现。
 
@@ -125,7 +126,7 @@ Clinical-o1/
 - canonical 字段：`id/source/question/reasoning/response/messages/split/meta`，其中 `meta` 保存完整 provenance。
 - 使用固定种子划分 train/dev，默认 98%/2%。
 - 对问题、CoT、Final Response 分别统计字符和 token 长度。
-- `max_length` 初始采用 4096；只有完整 token 报告证明必要时才调整。
+- 完整 token 报告显示最大值为 1,451，因此 Stage 3 固定 `max_length=2048`；超长样本直接报错，不静默截断。
 - 检查空答案、异常模板、重复样本、答案泄漏、语言异常和过长样本。
 
 ### 6.2 RL 数据
@@ -175,7 +176,9 @@ Clinical-o1/
 - 训练数据对最终评测的 fuzzy 候选采用保守排除，未决候选为 0；所有决定写入 `data/manifests/excluded_ids.jsonl`。
 - Qwen2.5 tokenizer 统计显示 SFT chat-template P95 905 tokens、最大 1,451，超过 4,096 tokens 的样本为 0。
 
-## 7. Stage 2：先建立 Base 全量评测基线
+## 7. Stage 2：Base 全量评测基线（延期）
+
+项目负责人决定先执行 Stage 3，因此本阶段延期但不视为完成。进入 GRPO 前必须补齐同一模型 revision、同一 prompt 和同一答案解析协议下的 Base/SFT 对比，避免无法判断 SFT 是否真实退化。
 
 必须在 English SFT 前冻结 Base 结果，否则后续无法判断训练增益。
 
@@ -212,11 +215,29 @@ Clinical-o1/
 ### 初始配置
 
 - 4-bit NF4 + double quantization，BF16 compute。
-- LoRA：`r=16`、`alpha=32`、`dropout=0.05`，覆盖 attention 和 MLP projection。
+- 固定环境：Python 3.10、PyTorch 2.8.0 + CUDA 12.8 runtime、Transformers 4.57.6、TRL 0.29.1、PEFT 0.19.1、bitsandbytes 0.49.2。
+- LoRA：`r=16`、`alpha=32`、`dropout=0.05`，使用 `all-linear` 覆盖 attention 和 MLP linear projection。
 - `completion_only_loss=true`。
-- `max_length=4096`，1 epoch。
+- `max_length=2048`、`packing=false`，1 epoch；发现超长样本立即停止。
 - 学习率主实验 `1e-4`，若 benchmark 退化则对比 `5e-5`。
-- 保存 step/epoch checkpoint、trainer state、token 统计、完整配置和环境信息。
+- RTX 4090 单卡 micro batch 1、梯度累积 16、有效 batch 16；开启 gradient checkpointing、BF16、TF32 和 SDPA。
+- smoke 为 100/32 条、10 steps；pilot 为 1,000/391 条、约 63 steps；full 为 19,147/391 条、约 1,197 steps。
+- 保存 checkpoint、trainer state、token 统计、完整配置、硬件/环境、JSONL/TensorBoard 日志及固定 dev 前后生成。
+
+### 已实现工程能力
+
+- [x] 数据 manifest aggregate SHA 与 train/dev 文件 SHA 训练前重算。
+- [x] Qwen chat template prompt/completion 前缀审计，并用 TRL 真实 collator 证明 prompt labels 全为 `-100`。
+- [x] CUDA、BF16、至少 23GB 显存、磁盘余量和 clean Git 强制预检。
+- [x] 4-bit NF4 QLoRA 构造，检查只有 LoRA 参数可训练。
+- [x] smoke/pilot/full profile、最优 dev loss checkpoint、断点恢复和禁止覆盖 run。
+- [x] SFT 前后固定 greedy generation、格式/重复/打满长度诊断。
+- [x] 本地 JSONL、TensorBoard、resolved config、环境和最终 adapter 落盘。
+- [x] 19 项本地 Ruff/Pytest 验收通过。
+- [ ] RTX 4090 smoke 前半程与 `checkpoint-5 → 10` 恢复实测。
+- [ ] pilot 与 full 训练实测。
+
+服务器执行细节见 `docs/stage3_sft_4090.md`。
 
 ### SFT 评测门槛
 
@@ -430,8 +451,8 @@ reward_samples.jsonl
 | --- | --- | --- | --- |
 | M0 工程冻结 | 已完成 | artifact inventory、固定环境、测试骨架 | 历史 outputs 完整，CI/dry-run 通过 |
 | M1 数据闭环 | 已完成 | SFT/RL/eval 数据、manifest、污染报告 | schema 100% 合法，无已知评测污染 |
-| M2 Base 基线 | 待执行 | 完整 MedQA/MedMCQA Base 报告 | 评测可复现、解析失败 < 1% |
-| M3 English SFT | 待执行 | full adapter、训练日志、SFT 评测 | 通过 SFT 门禁 |
+| M2 Base 基线 | 已延期 | 完整 MedQA/MedMCQA Base 报告 | 进入 GRPO 前补齐，评测可复现、解析失败 < 1% |
+| M3 English SFT | 实现完成、待实跑 | 4090 配置/CLI/测试、full adapter、训练日志 | smoke 恢复、pilot、full 与 SFT 门禁通过 |
 | M4 PRM/Reward | 待执行 | PRM 数据、校准报告、Reward 测试 | 人工集验证通过，组内有方差 |
 | M5 GRPO | 待执行 | smoke/full checkpoint、稳定性曲线 | 至少两个 seed 同方向优于 SFT |
 | M6 DAPO | 待执行 | 完整四组件、同预算对照 | 相同初始化下优于或稳定于 GRPO |
@@ -439,4 +460,4 @@ reward_samples.jsonl
 
 ## 16. 下一步
 
-M0/M1 已完成。下一步执行 M2：冻结 Base 模型 revision、评测 prompt、解析器和生成参数，在 MedQA/MedMCQA/PubMedQA 上运行 direct/cot 基线并落盘逐题结果。Base 全量评测门禁通过前不启动 English SFT。
+M0/M1 已完成，M2 按项目决定延期。下一步按 `docs/stage3_sft_4090.md` 在 RTX 4090 上依次执行 full dry-run、smoke 5 steps、从 checkpoint 恢复到 10 steps、pilot 和 full。Stage 3 通过内部门禁后补齐 Base/SFT 公平评测，再进入 PRM/Reward 与 GRPO。

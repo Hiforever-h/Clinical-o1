@@ -1,0 +1,104 @@
+schema_version: 1
+experiment_name: qwen25_7b_huatuo_en_qlora_r16
+
+# 基础模型固定到 commit，避免同名仓库更新后实验漂移。
+model:
+  name_or_path: Qwen/Qwen2.5-7B-Instruct
+  revision: a09a35458c702b33eeacc393d103063234e8bc28
+  trust_remote_code: false
+  attn_implementation: sdpa
+
+# 只使用 M1 已去重、已排除 benchmark 污染的英文 SFT train/dev。
+data:
+  train_file: data/processed/sft/huatuo_o1_sft_en_train.jsonl
+  eval_file: data/processed/sft/huatuo_o1_sft_en_dev.jsonl
+  manifest_file: data/manifests/english_mainline.json
+  expected_aggregate_sha256: 80619feea7de6575e376a7cc9ae144c7e5a8328ec65e52aec20e9dd645db980d
+  max_length: 2048
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  audit_sample_size: 100
+
+# RTX 4090 24GB 的 4-bit QLoRA 量化参数。
+quantization:
+  load_in_4bit: true
+  quant_type: nf4
+  use_double_quant: true
+  compute_dtype: bfloat16
+
+# all-linear 同时覆盖 attention 和 MLP 的线性投影层。
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: all-linear
+  bias: none
+  use_rslora: false
+
+# 正式训练采用 micro batch 1，通过梯度累积得到有效 batch 16。
+training:
+  num_train_epochs: 1.0
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 0.0001
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: adamw_torch_fused
+  bf16: true
+  fp16: false
+  tf32: true
+  gradient_checkpointing: true
+  use_reentrant: false
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100
+  save_total_limit: 3
+  eval_on_start: true
+  seed: 42
+  data_seed: 42
+  dataloader_num_workers: 4
+  report_to:
+    - tensorboard
+
+# 对固定 dev 前 N 条做 SFT 前后 greedy generation，观察格式与重复退化。
+generation:
+  enabled: true
+  sample_size: 64
+  max_new_tokens: 1024
+
+# 正式 run 要求 clean Git，并为模型缓存与 checkpoint 保留磁盘余量。
+runtime:
+  output_root: outputs/sft
+  minimum_free_disk_gb: 15
+  require_clean_git: true
+
+# 三档 profile 必须按 smoke → pilot → full 的顺序执行。
+profiles:
+  smoke:
+    max_train_samples: 100
+    max_eval_samples: 32
+    max_steps: 10
+    gradient_accumulation_steps: 4
+    eval_steps: 5
+    save_steps: 5
+    generation_sample_size: 4
+  pilot:
+    max_train_samples: 1000
+    max_eval_samples: 391
+    max_steps: -1
+    gradient_accumulation_steps: 16
+    eval_steps: 20
+    save_steps: 20
+    generation_sample_size: 16
+  full:
+    max_train_samples: null
+    max_eval_samples: null
+    max_steps: -1
+    gradient_accumulation_steps: 16
+    eval_steps: 100
+    save_steps: 100
+    generation_sample_size: 64
