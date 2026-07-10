@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-10T03:03:12.340214+00:00",
+  "pipeline": "english_mainline_m1",
+  "seed": 42,
+  "base_model": {
+    "repository": "Qwen/Qwen2.5-7B-Instruct",
+    "revision": "a09a35458c702b33eeacc393d103063234e8bc28"
+  },
+  "source_revisions": {
+    "huatuo_sft_en": "fc2c9e8a37b38f38da6d449564a8c350b244aef4",
+    "huatuo_verifiable": "46d5175eb74fdef3516d51d52e8c40db04bbdf35",
+    "medqa_usmle": "0fb93dd23a7339b6dcd27e241cb9b5eca62d4d18",
+    "medmcqa": "91c6572c454088bf71b679ad90aa8dffcd0d5868",
+    "pubmedqa_labeled": "9001f2853fb87cab8d220904e0de81ac6973b318"
+  },
+  "datasets": {
+    "sft": {
+      "key": "huatuo_sft_en",
+      "repository": "FreedomIntelligence/medical-o1-reasoning-SFT",
+      "revision": "fc2c9e8a37b38f38da6d449564a8c350b244aef4",
+      "config": "en",
+      "split": "train",
+      "rows_before": 19704,
+      "rows_after": 19538,
+      "splits": {
+        "train": 19147,
+        "dev": 391
+      },
+      "dedup_against": [
+        "self",
+        "medqa",
+        "medmcqa",
+        "pubmedqa"
+      ]
+    },
+    "rl": {
+      "key": "huatuo_verifiable",
+      "repository": "FreedomIntelligence/medical-o1-verifiable-problem",
+      "revision": "46d5175eb74fdef3516d51d52e8c40db04bbdf35",
+      "config": "default",
+      "split": "train",
+      "rows_before": 40644,
+      "rows_after": 25239,
+      "splits": {
+        "train": 24734,
+        "dev": 505
+      },
+      "dedup_against": [
+        "self",
+        "huatuo_sft_en",
+        "medqa",
+        "medmcqa",
+        "pubmedqa"
+      ]
+    },
+    "evaluation": {
+      "rows_before": 6456,
+      "rows_after": 6456,
+      "splits": {
+        "medqa_test": 1273,
+        "medmcqa_validation": 4183,
+        "pubmedqa_labeled": 1000
+      }
+    }
+  },
+  "files": {
+    "sft_train": {
+      "path": "data/processed/sft/huatuo_o1_sft_en_train.jsonl",
+      "rows": 19147,
+      "bytes": 117850231,
+      "sha256": "c34b03b8bf5e033512c610f512a7e86d9c92eda1d8436d49e3059b05fd6f0ec2",
+      "schema": "sft",
+      "sources": [
+        {
+          "key": "huatuo_sft_en",
+          "repository": "FreedomIntelligence/medical-o1-reasoning-SFT",
+          "revision": "fc2c9e8a37b38f38da6d449564a8c350b244aef4",
+          "config": "en",
+          "split": "train"
+        }
+      ],
+      "exclusions": [
+        "sft_vs_final_eval"
+      ]
+    },
+    "sft_dev": {
+      "path": "data/processed/sft/huatuo_o1_sft_en_dev.jsonl",
+      "rows": 391,
+      "bytes": 2370377,
+      "sha256": "2b9b297923ae84f7764964d71f627faef4c421c89d57001de2a1430ca3a51998",
+      "schema": "sft",
+      "sources": [
+        {
+          "key": "huatuo_sft_en",
+          "repository": "FreedomIntelligence/medical-o1-reasoning-SFT",
+          "revision": "fc2c9e8a37b38f38da6d449564a8c350b244aef4",
+          "config": "en",
+          "split": "train"
+        }
+      ],
+      "exclusions": [
+        "sft_vs_final_eval"
+      ]
+    },
+    "rl_train": {
+      "path": "data/processed/rl/huatuo_o1_verifiable_en_train.jsonl",
+      "rows": 24734,
+      "bytes": 12768757,
+      "sha256": "f0dd2d4d402b246fed15e42e0046bac4b5c3dc41b199ff9e8bf833844a2377ee",
+      "schema": "rl",
+      "sources": [
+        {
+          "key": "huatuo_verifiable",
+          "repository": "FreedomIntelligence/medical-o1-verifiable-problem",
+          "revision": "46d5175eb74fdef3516d51d52e8c40db04bbdf35",
+          "config": "default",
+          "split": "train"
+        }
+      ],
+      "exclusions": [
+        "rl_vs_sft",
+        "rl_vs_final_eval"
+      ]
+    },
+    "rl_dev": {
+      "path": "data/processed/rl/huatuo_o1_verifiable_en_dev.jsonl",
+      "rows": 505,
+      "bytes": 261061,
+      "sha256": "7a525805731ecbd32e1607851b2d419f3d9bcfddf22363e96a2d326a715e56bc",
+      "schema": "rl",
+      "sources": [
+        {
+          "key": "huatuo_verifiable",
+          "repository": "FreedomIntelligence/medical-o1-verifiable-problem",
+          "revision": "46d5175eb74fdef3516d51d52e8c40db04bbdf35",
+          "config": "default",
+          "split": "train"
+        }
+      ],
+      "exclusions": [
+        "rl_vs_sft",
+        "rl_vs_final_eval"
+      ]
+    },
+    "medqa_test": {
+      "path": "data/processed/eval/medqa_usmle_test.jsonl",
+      "rows": 1273,
+      "bytes": 1596326,
+      "sha256": "7ddc28233995a8461e4c78ce1c0805d9384468794bb31a9e844e11bd03725429",
+      "schema": "mcq",
+      "sources": [
+        {
+          "key": "medqa_usmle",
+          "repository": "GBaker/MedQA-USMLE-4-options",
+          "revision": "0fb93dd23a7339b6dcd27e241cb9b5eca62d4d18",
+          "config": null,
+          "split": "test"
+        }
+      ],
+      "exclusions": []
+    },
+    "medmcqa_validation": {
+      "path": "data/processed/eval/medmcqa_validation.jsonl",
+      "rows": 4183,
+      "bytes": 3757148,
+      "sha256": "ab5aa17d92a711105384276d1e4d7ebb2b7b666c6c43d1a1dc4397382b18b139",
+      "schema": "mcq",
+      "sources": [
+        {
+          "key": "medmcqa",
+          "repository": "openlifescienceai/medmcqa",
+          "revision": "91c6572c454088bf71b679ad90aa8dffcd0d5868",
+          "config": null,
+          "split": "validation"
+        }
+      ],
+      "exclusions": []
+    },
+    "pubmedqa_labeled": {
+      "path": "data/processed/eval/pubmedqa_labeled_test.jsonl",
+      "rows": 1000,
+      "bytes": 2226649,
+      "sha256": "4af5543b1601e275bf866018d5e4f0b6018c5c0b40d411638d4ecae436504d5e",
+      "schema": "mcq",
+      "sources": [
+        {
+          "key": "pubmedqa_labeled",
+          "repository": "qiaojin/PubMedQA",
+          "revision": "9001f2853fb87cab8d220904e0de81ac6973b318",
+          "config": "pqa_labeled",
+          "split": "train"
+        }
+      ],
+      "exclusions": []
+    }
+  },
+  "aggregate_sha256": "80619feea7de6575e376a7cc9ae144c7e5a8328ec65e52aec20e9dd645db980d",
+  "excluded_ids_file": "data/manifests/excluded_ids.jsonl",
+  "contamination_report": "reports/data/contamination_report.json",
+  "data_quality_report": "reports/data/data_quality_report.json"
+}

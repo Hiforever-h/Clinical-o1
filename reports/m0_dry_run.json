@@ -1,0 +1,54 @@
+{
+  "data": {
+    "manifest": "data/manifests/english_mainline.json",
+    "aggregate_sha256": "80619feea7de6575e376a7cc9ae144c7e5a8328ec65e52aec20e9dd645db980d",
+    "checked_files": {
+      "sft_train": 19147,
+      "sft_dev": 391,
+      "rl_train": 24734,
+      "rl_dev": 505,
+      "medqa_test": 1273,
+      "medmcqa_validation": 4183,
+      "pubmedqa_labeled": 1000
+    },
+    "schema_invalid_rows": 0,
+    "training_duplicate_normalized_prompts": 0,
+    "unresolved_contamination_candidates": 0,
+    "status": "ok"
+  },
+  "sft": {
+    "files": [
+      "data/processed/sft/huatuo_o1_sft_en_train.jsonl",
+      "data/processed/sft/huatuo_o1_sft_en_dev.jsonl"
+    ],
+    "sample_ids": [
+      "huatuo_sft_en_004354",
+      "huatuo_sft_en_007599"
+    ],
+    "status": "ok"
+  },
+  "rl": {
+    "files": [
+      "data/processed/rl/huatuo_o1_verifiable_en_train.jsonl",
+      "data/processed/rl/huatuo_o1_verifiable_en_dev.jsonl"
+    ],
+    "sample_ids": [
+      "huatuo_rl_en_027985",
+      "huatuo_rl_en_027598"
+    ],
+    "status": "ok"
+  },
+  "eval": {
+    "files": [
+      "data/processed/eval/medqa_usmle_test.jsonl",
+      "data/processed/eval/medmcqa_validation.jsonl",
+      "data/processed/eval/pubmedqa_labeled_test.jsonl"
+    ],
+    "sample_answers": {
+      "medqa_test_000001": "B",
+      "45258d3d-b974-44dd-a161-c3fccbdadd88": "A",
+      "pubmedqa_21645374": "A"
+    },
+    "status": "ok"
+  }
+}

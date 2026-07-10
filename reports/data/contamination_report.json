@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-10T03:02:57.690976+00:00",
+  "config": {
+    "repo_root": "/Users/hiforever/Documents/AiProject/Clinical-o1",
+    "seed": 42,
+    "sft_dev_ratio": 0.02,
+    "rl_dev_ratio": 0.02,
+    "max_sft_samples": null,
+    "max_rl_samples": null,
+    "fuzzy_review_threshold": 0.82,
+    "fuzzy_exclude_threshold": 0.93,
+    "generate_quality_report": true
+  },
+  "sources": {
+    "huatuo_sft_en": {
+      "key": "huatuo_sft_en",
+      "repository": "FreedomIntelligence/medical-o1-reasoning-SFT",
+      "revision": "fc2c9e8a37b38f38da6d449564a8c350b244aef4",
+      "config": "en",
+      "split": "train"
+    },
+    "huatuo_verifiable": {
+      "key": "huatuo_verifiable",
+      "repository": "FreedomIntelligence/medical-o1-verifiable-problem",
+      "revision": "46d5175eb74fdef3516d51d52e8c40db04bbdf35",
+      "config": "default",
+      "split": "train"
+    },
+    "medqa_usmle": {
+      "key": "medqa_usmle",
+      "repository": "GBaker/MedQA-USMLE-4-options",
+      "revision": "0fb93dd23a7339b6dcd27e241cb9b5eca62d4d18",
+      "config": null,
+      "split": "test"
+    },
+    "medmcqa": {
+      "key": "medmcqa",
+      "repository": "openlifescienceai/medmcqa",
+      "revision": "91c6572c454088bf71b679ad90aa8dffcd0d5868",
+      "config": null,
+      "split": "validation"
+    },
+    "pubmedqa_labeled": {
+      "key": "pubmedqa_labeled",
+      "repository": "qiaojin/PubMedQA",
+      "revision": "9001f2853fb87cab8d220904e0de81ac6973b318",
+      "config": "pqa_labeled",
+      "split": "train"
+    }
+  },
+  "audits": [
+    {
+      "name": "sft_vs_final_eval",
+      "query_count": 19664,
+      "reference_count": 6456,
+      "excluded_count": 126,
+      "candidate_count": 126,
+      "unresolved_review_count": 0,
+      "counts": {
+        "exclude_exact": 0,
+        "exclude_common_64": 124,
+        "exclude_fuzzy_high": 0,
+        "review": 0,
+        "clean": 19538,
+        "exclude_fuzzy_conservative": 2
+      },
+      "maximum_tfidf_cosine": 0.88679,
+      "method": {
+        "normalization": "NFKC + lowercase + Unicode alphanumeric characters only",
+        "exact": true,
+        "common_span": 64,
+        "char_ngram_jaccard_n": 5,
+        "sparse_embedding": "character TF-IDF (3-5 grams) cosine nearest neighbors"
+      }
+    },
+    {
+      "name": "rl_vs_sft",
+      "query_count": 40276,
+      "reference_count": 19538,
+      "excluded_count": 14978,
+      "candidate_count": 14978,
+      "unresolved_review_count": 0,
+      "counts": {
+        "exclude_exact": 13529,
+        "exclude_common_64": 1073,
+        "exclude_fuzzy_high": 10,
+        "review": 0,
+        "clean": 25298,
+        "exclude_fuzzy_conservative": 366
+      },
+      "maximum_tfidf_cosine": 1.0,
+      "method": {
+        "normalization": "NFKC + lowercase + Unicode alphanumeric characters only",
+        "exact": true,
+        "common_span": 64,
+        "char_ngram_jaccard_n": 5,
+        "sparse_embedding": "character TF-IDF (3-5 grams) cosine nearest neighbors"
+      }
+    },
+    {
+      "name": "rl_vs_final_eval",
+      "query_count": 25298,
+      "reference_count": 6456,
+      "excluded_count": 59,
+      "candidate_count": 59,
+      "unresolved_review_count": 0,
+      "counts": {
+        "exclude_exact": 0,
+        "exclude_common_64": 31,
+        "exclude_fuzzy_high": 0,
+        "review": 0,
+        "clean": 25239,
+        "exclude_fuzzy_conservative": 28
+      },
+      "maximum_tfidf_cosine": 0.958104,
+      "method": {
+        "normalization": "NFKC + lowercase + Unicode alphanumeric characters only",
+        "exact": true,
+        "common_span": 64,
+        "char_ngram_jaccard_n": 5,
+        "sparse_embedding": "character TF-IDF (3-5 grams) cosine nearest neighbors"
+      }
+    }
+  ],
+  "candidate_file": "reports/data/contamination_candidates.jsonl",
+  "candidate_rows": 15163,
+  "rows": {
+    "sft_before": 19704,
+    "sft_after_internal_dedup": 19664,
+    "sft_after_eval_exclusion": 19538,
+    "rl_before": 40644,
+    "rl_after_internal_dedup": 40276,
+    "rl_after_sft_exclusion": 25298,
+    "rl_after_eval_exclusion": 25239
+  }
+}
