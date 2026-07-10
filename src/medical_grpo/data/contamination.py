@@ -56,6 +56,8 @@ class AuditResult:
     maximum_tfidf_cosine: float
 
     def summary_dict(self) -> dict[str, Any]:
+        """生成不含逐条候选的审计摘要，供 manifest 和报告引用。"""
+
         return {
             "name": self.name,
             "query_count": self.query_count,
@@ -75,6 +77,8 @@ class AuditResult:
         }
 
     def candidates_as_dicts(self) -> list[dict[str, Any]]:
+        """将候选对象展开为可序列化字典，保留每项相似度。"""
+
         return [asdict(candidate) for candidate in self.candidates]
 
 
@@ -107,6 +111,8 @@ def normalize_for_audit(text: str) -> str:
 
 
 def _char_ngrams(text: str, n: int = 5) -> set[str]:
+    """把标准化文本切成去重字符 n-gram 集合。"""
+
     if len(text) < n:
         return {text} if text else set()
     return {text[index : index + n] for index in range(len(text) - n + 1)}

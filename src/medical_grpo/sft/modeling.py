@@ -14,28 +14,33 @@ def cuda_preflight(minimum_vram_gb: float = 23.0) -> dict[str, Any]:
 
     import torch
 
+    # 固定软件栈，防止不同 PyTorch/CUDA kernel 组合影响结果和显存占用。
     if not torch.cuda.is_available():
         raise RuntimeError("train-sft 需要 CUDA GPU；本地仅可运行 sft-dry-run")
     if not torch.__version__.startswith("2.8.0"):
         raise RuntimeError(f"正式基线要求 torch 2.8.0，当前为 {torch.__version__}")
     if torch.version.cuda != "12.8":
         raise RuntimeError(f"正式基线要求 PyTorch CUDA runtime 12.8，当前为 {torch.version.cuda}")
+    # 单卡默认使用 0；保留 LOCAL_RANK 以兼容 accelerate 启动方式。
     device_index = int(os.environ.get("LOCAL_RANK", "0"))
     torch.cuda.set_device(device_index)
     properties = torch.cuda.get_device_properties(device_index)
     total_vram_gb = properties.total_memory / 1024**3
+    # 标称 24GB 的 4090 实际可见显存略小，因此阈值设置为 23GB。
     if total_vram_gb < minimum_vram_gb:
         raise RuntimeError(
             f"GPU 显存不足：{total_vram_gb:.2f}GB < {minimum_vram_gb:.2f}GB"
         )
     if not torch.cuda.is_bf16_supported():
         raise RuntimeError("当前 GPU/CUDA/PyTorch 组合不支持 BF16")
+    # bitsandbytes 负责 NF4 量化，版本漂移可能改变 CUDA wheel 与算子行为。
     try:
         bnb_version = version("bitsandbytes")
     except PackageNotFoundError as exc:
         raise RuntimeError("未安装 bitsandbytes，请安装项目的 sft 依赖") from exc
     if bnb_version != "0.49.2":
         raise RuntimeError(f"正式基线要求 bitsandbytes 0.49.2，当前为 {bnb_version}")
+    # 预检结果会随 run 一起落盘，便于之后确认训练使用了哪张卡。
     return {
         "device_index": device_index,
         "device_name": properties.name,
@@ -53,6 +58,7 @@ def load_tokenizer(config: SFTExperimentConfig) -> Any:
 
     from transformers import AutoTokenizer
 
+    # tokenizer 与模型使用同一 commit revision，避免 chat template 漂移。
     tokenizer = AutoTokenizer.from_pretrained(
         config.model.name_or_path,
         revision=config.model.revision,
@@ -60,9 +66,11 @@ def load_tokenizer(config: SFTExperimentConfig) -> Any:
         use_fast=True,
     )
     if tokenizer.pad_token_id is None:
+        # Qwen 可安全复用 EOS 作为 padding；不新增词表，避免调整 embedding。
         if tokenizer.eos_token_id is None:
             raise RuntimeError("tokenizer 同时缺少 pad_token 和 eos_token")
         tokenizer.pad_token = tokenizer.eos_token
+    # 训练批次右侧 padding，completion mask 与 causal labels 保持自然对齐。
     tokenizer.padding_side = "right"
     return tokenizer
 
@@ -74,10 +82,12 @@ def build_qlora_model(config: SFTExperimentConfig) -> tuple[Any, dict[str, Any]]
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
+    # 显式映射允许的 dtype，拒绝 YAML 中无法识别的自由字符串。
     dtype_by_name = {"bfloat16": torch.bfloat16, "float16": torch.float16}
     compute_dtype = dtype_by_name.get(config.quantization.compute_dtype)
     if compute_dtype is None:
         raise ValueError(f"不支持 compute_dtype={config.quantization.compute_dtype}")
+    # NF4 存储基础权重，double quant 继续压缩量化常数，计算使用 BF16。
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=config.quantization.load_in_4bit,
         bnb_4bit_quant_type=config.quantization.quant_type,
@@ -85,6 +95,7 @@ def build_qlora_model(config: SFTExperimentConfig) -> tuple[Any, dict[str, Any]]
         bnb_4bit_compute_dtype=compute_dtype,
     )
     device_index = int(os.environ.get("LOCAL_RANK", "0"))
+    # device_map 把完整量化模型固定在一张卡上，禁止自动切到 CPU 造成假跑通。
     model = AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path,
         revision=config.model.revision,
@@ -95,12 +106,15 @@ def build_qlora_model(config: SFTExperimentConfig) -> tuple[Any, dict[str, Any]]
         attn_implementation=config.model.attn_implementation,
         low_cpu_mem_usage=True,
     )
+    # KV cache 只服务生成，训练时关闭以兼容 gradient checkpointing 并省显存。
     model.config.use_cache = False
+    # k-bit 预处理会冻结基础权重、处理输入梯度并准备 checkpointing。
     model = prepare_model_for_kbit_training(
         model,
         use_gradient_checkpointing=config.training.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": config.training.use_reentrant},
     )
+    # 仅挂载 LoRA adapter；基础 4-bit 权重始终不参与优化器更新。
     peft_config = LoraConfig(
         r=config.lora.rank,
         lora_alpha=config.lora.alpha,
@@ -111,6 +125,7 @@ def build_qlora_model(config: SFTExperimentConfig) -> tuple[Any, dict[str, Any]]
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, peft_config)
+    # 枚举参数做最后一道门禁：任何非 LoRA 参数可训练都立即终止。
     trainable_parameters = 0
     total_parameters = 0
     unexpected_trainable: list[str] = []
@@ -125,6 +140,7 @@ def build_qlora_model(config: SFTExperimentConfig) -> tuple[Any, dict[str, Any]]
         raise RuntimeError("LoRA 没有产生任何可训练参数")
     if unexpected_trainable:
         raise RuntimeError(f"发现非 LoRA 可训练参数：{unexpected_trainable[:20]}")
+    # 参数统计写入 run 目录，用于核对 adapter 容量和训练比例。
     report = {
         "total_parameters": total_parameters,
         "trainable_parameters": trainable_parameters,

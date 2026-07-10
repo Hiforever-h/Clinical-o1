@@ -1,3 +1,5 @@
+"""训练数据与 benchmark 污染审计规则的单元测试。"""
+
 from __future__ import annotations
 
 from medical_grpo.data.contamination import (
@@ -11,6 +13,8 @@ from medical_grpo.data.contamination import (
 
 
 def test_normalization_and_common_span() -> None:
+    """大小写和标点差异不应绕过标准化及连续片段检测。"""
+
     left = "A patient has sudden chest pain, severe dyspnea, and hypotension after surgery."
     right = "A PATIENT has sudden chest pain; severe dyspnea and hypotension after surgery!"
     assert normalize_for_audit(left) == normalize_for_audit(right)
@@ -19,6 +23,8 @@ def test_normalization_and_common_span() -> None:
 
 
 def test_exact_contamination_is_excluded() -> None:
+    """与保护集完全相同的训练问题必须直接排除。"""
+
     query = [AuditRecord("train-1", "sft", "What is the treatment for bacterial meningitis?")]
     reference = [AuditRecord("eval-1", "medqa", "What is the treatment for bacterial meningitis?")]
 
@@ -30,6 +36,8 @@ def test_exact_contamination_is_excluded() -> None:
 
 
 def test_clean_question_is_retained() -> None:
+    """语义和文本均无关的问题不应被污染规则误删。"""
+
     query = [AuditRecord("train-1", "sft", "Which receptor is blocked by atropine in bradycardia?")]
     reference = [AuditRecord("eval-1", "medqa", "How is an open tibial fracture initially managed?")]
 
@@ -40,6 +48,8 @@ def test_clean_question_is_retained() -> None:
 
 
 def test_review_candidates_can_be_conservatively_excluded() -> None:
+    """模糊复核候选可按 M1 保守策略提升为排除项。"""
+
     query = [AuditRecord("train-1", "rl", "What is the earliest manifestation of Cushing syndrome?")]
     reference = [
         AuditRecord(

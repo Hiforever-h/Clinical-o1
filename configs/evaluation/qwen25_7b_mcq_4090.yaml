@@ -1,0 +1,53 @@
+schema_version: 1
+experiment_name: qwen25_7b_english_mcq
+
+# Base 和所有 adapter 都从同一个 BF16 基础模型 revision 加载。
+model:
+  name_or_path: Qwen/Qwen2.5-7B-Instruct
+  revision: a09a35458c702b33eeacc393d103063234e8bc28
+  trust_remote_code: false
+  attn_implementation: sdpa
+  dtype: bfloat16
+
+# 三个正式 benchmark 的路径与 manifest key，训练数据不会被评测器读取。
+data:
+  manifest_file: data/manifests/english_mainline.json
+  expected_aggregate_sha256: 80619feea7de6575e376a7cc9ae144c7e5a8328ec65e52aec20e9dd645db980d
+  datasets:
+    medqa:
+      manifest_key: medqa_test
+      path: data/processed/eval/medqa_usmle_test.jsonl
+    medmcqa:
+      manifest_key: medmcqa_validation
+      path: data/processed/eval/medmcqa_validation.jsonl
+    pubmedqa:
+      manifest_key: pubmedqa_labeled
+      path: data/processed/eval/pubmedqa_labeled_test.jsonl
+
+# 输入绝不静默截断；分片完成后原子落盘，支持中断恢复。
+inference:
+  max_input_length: 2048
+  shard_size: 64
+  seed: 42
+  minimum_vram_gb: 23.0
+
+# direct 只输出答案；cot 使用与 Huatuo SFT 一致的两段式格式。
+protocols:
+  direct:
+    max_new_tokens: 32
+    batch_size: 8
+  cot:
+    max_new_tokens: 1024
+    batch_size: 2
+
+# full 默认每个数据集全部评测；smoke 固定取每个数据集前 12 题。
+profiles:
+  smoke:
+    max_samples_per_dataset: 12
+  full:
+    max_samples_per_dataset: null
+
+runtime:
+  output_root: outputs/evaluation
+  minimum_free_disk_gb: 5
+  require_clean_git: true

@@ -20,6 +20,8 @@ from medical_grpo.sft.trainer import build_trl_sft_config
 
 
 def _version(package: str) -> str | None:
+    """读取包版本；可选依赖缺失时记录 null 而不是中止检查。"""
+
     try:
         return version(package)
     except PackageNotFoundError:
@@ -35,6 +37,7 @@ def verify_trl_completion_labels(
 
     from trl.trainer.sft_trainer import DataCollatorForLanguageModeling
 
+    # 按 TRL 内部格式手工构造 input_ids 与 completion_mask。
     examples: list[dict[str, list[int]]] = []
     prompt_lengths: list[int] = []
     full_lengths: list[int] = []
@@ -51,8 +54,10 @@ def verify_trl_completion_labels(
             tokenize=True,
             add_generation_prompt=False,
         )
+        # 若 prompt 不是完整对话的严格前缀，mask 切点就不可信，必须停止。
         if full_ids[: len(prompt_ids)] != prompt_ids:
             raise ValueError(f"{record['id']}: TRL label 审计发现 prompt 前缀不匹配")
+        # mask=0 对应 user prompt，mask=1 对应 assistant completion。
         examples.append(
             {
                 "input_ids": full_ids,
@@ -63,6 +68,7 @@ def verify_trl_completion_labels(
         prompt_lengths.append(len(prompt_ids))
         full_lengths.append(len(full_ids))
 
+    # 使用固定 TRL 版本的真实 collator，而不是只验证项目自己的模拟逻辑。
     collator = DataCollatorForLanguageModeling(
         pad_token_id=tokenizer.pad_token_id,
         completion_only_loss=True,
@@ -73,9 +79,11 @@ def verify_trl_completion_labels(
         zip(prompt_lengths, full_lengths, strict=True)
     ):
         labels = batch["labels"][row]
+        # completion-only loss 要求所有 prompt label 都被替换成忽略值 -100。
         if not bool((labels[:prompt_length] == -100).all()):
             raise ValueError(f"row={row}: prompt token 未被 TRL collator 屏蔽")
         completion_labels = labels[prompt_length:full_length]
+        # completion 区域必须全部保留监督信号，不能被错误 mask。
         if completion_labels.numel() == 0 or bool((completion_labels == -100).any()):
             raise ValueError(f"row={row}: completion label 被意外屏蔽")
         supervised_tokens += int(completion_labels.numel())
@@ -96,6 +104,7 @@ def run_sft_dry_run(
     """验证正式数据、chat template、监督边界和 TRL 参数映射。"""
 
     repo_root = repo_root.resolve()
+    # dry-run 与正式训练共用相同路径解析和数据哈希门禁。
     train_path = config.resolve_path(repo_root, config.data.train_file)
     eval_path = config.resolve_path(repo_root, config.data.eval_file)
     manifest_path = config.resolve_path(repo_root, config.data.manifest_file)
@@ -106,6 +115,7 @@ def run_sft_dry_run(
         train_path,
         eval_path,
     )
+    # CLI 显式限制优先于 profile，方便快速检查自定义的小样本规模。
     effective_train_limit = (
         max_train_samples
         if max_train_samples is not None
@@ -119,6 +129,7 @@ def run_sft_dry_run(
     train_records = load_sft_records(train_path, effective_train_limit)
     eval_records = load_sft_records(eval_path, effective_eval_limit)
     tokenizer = load_tokenizer(config)
+    # 全量审计序列长度与 chat-template 前缀，但不加载 7B 模型权重。
     train_audit = audit_token_boundaries(
         train_records,
         tokenizer,
@@ -131,16 +142,19 @@ def run_sft_dry_run(
         config.data.max_length,
         inspect_samples=min(config.data.audit_sample_size, len(eval_records)),
     )
+    # 构造 Dataset 以验证列结构，并进一步交给 TRL collator 检查 labels。
     train_dataset = build_hf_dataset(train_records)
     eval_dataset = build_hf_dataset(eval_records)
     trl_label_audit = verify_trl_completion_labels(train_records, tokenizer)
     dry_run_dir = repo_root / ".dry-run/sft"
+    # 本地 CPU/MPS 关闭 BF16/TF32 硬件校验，其余训练参数映射保持不变。
     trl_config = build_trl_sft_config(
         config,
         dry_run_dir,
         run_name="sft-dry-run",
         hardware_agnostic=True,
     )
+    # smoke 使用显式 max_steps；pilot/full 按样本数、batch 和 epoch 推导。
     if config.profile.max_steps > 0:
         expected_steps = config.profile.max_steps
     else:
@@ -195,6 +209,7 @@ def write_dry_run_report(path: Path, report: dict[str, Any]) -> None:
     """原子保存 dry-run 报告。"""
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 原子替换保证自动化读取方不会读到写了一半的 JSON。
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)

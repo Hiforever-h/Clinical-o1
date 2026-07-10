@@ -12,16 +12,19 @@ dependencies = [
   "datasets==5.0.0",
   "huggingface-hub==0.36.2",
   "numpy==2.2.6",
+  "scipy==1.15.3",
   "scikit-learn==1.7.2",
   "torch==2.8.0",
   "transformers==4.57.6",
 ]
 
 [project.optional-dependencies]
+# 本地质量检查依赖不进入租卡服务器的最小运行链路。
 dev = [
   "pytest==9.1.1",
   "ruff==0.15.20",
 ]
+# Stage 3 固定训练栈；bitsandbytes 只在 Linux CUDA 服务器安装。
 sft = [
   "accelerate==1.14.0",
   "bitsandbytes==0.49.2; platform_system == 'Linux'",
@@ -30,6 +33,13 @@ sft = [
   "safetensors>=0.5.0,<1.0.0",
   "tensorboard>=2.20.0,<3.0.0",
   "trl==0.29.1",
+]
+# 独立评测只需要 BF16 模型加载与可选 PEFT adapter，不依赖 bitsandbytes/TRL。
+evaluation = [
+  "accelerate==1.14.0",
+  "peft==0.19.1",
+  "pyyaml==6.0.3",
+  "safetensors>=0.5.0,<1.0.0",
 ]
 
 [project.scripts]

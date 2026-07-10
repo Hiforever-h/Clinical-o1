@@ -15,11 +15,15 @@ from medical_grpo.tracking.artifacts import sha256_file
 
 @dataclass(frozen=True)
 class TokenAuditSummary:
+    """汇总全量序列长度、监督 token 和模板边界异常。"""
+
+    # input 统计覆盖 prompt 与 completion 拼接后的完整训练序列。
     rows: int
     min_input_tokens: int
     mean_input_tokens: float
     p95_input_tokens: int
     max_input_tokens: int
+    # supervised 统计只覆盖 completion，等价于 labels != -100 的区域。
     min_supervised_tokens: int
     mean_supervised_tokens: float
     max_supervised_tokens: int
@@ -27,9 +31,12 @@ class TokenAuditSummary:
     empty_completion_rows: int
     prefix_mismatch_rows: int
     max_length: int
+    # 保存少量解码预览，便于人工确认监督从“## Thinking”开始。
     inspected_samples: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为可写入 JSON 报告的普通字典。"""
+
         return asdict(self)
 
 
@@ -39,6 +46,7 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
+            # 允许文件末尾或人工拼接时出现空行，但不把空行计作样本。
             if not line.strip():
                 continue
             try:
@@ -55,11 +63,13 @@ def load_sft_records(path: Path, max_samples: int | None = None) -> list[dict[st
     """逐条通过 canonical schema，并可为 smoke/pilot 截取固定前 N 条。"""
 
     raw_records = read_jsonl(path)
+    # 固定截取文件前 N 条，保证 smoke/pilot 多次运行使用相同样本。
     if max_samples is not None:
         if max_samples <= 0:
             raise ValueError("max_samples 必须大于 0")
         raw_records = raw_records[:max_samples]
     records: list[dict[str, Any]] = []
+    # 复用 M1 canonical schema，避免训练器接受字段缺失或角色异常的数据。
     for index, record in enumerate(raw_records, start=1):
         try:
             records.append(to_sft_sample(record).to_dict())
@@ -74,14 +84,17 @@ def to_prompt_completion(record: Mapping[str, Any]) -> dict[str, Any]:
     """把 canonical 单轮对话拆成 TRL conversational prompt-completion。"""
 
     messages = record.get("messages")
+    # 第一版只支持严格的单轮 user→assistant，后续多轮需单独设计 loss mask。
     if not isinstance(messages, list) or len(messages) != 2:
         raise ValueError(f"{record.get('id')}: 当前 SFT 只支持单轮 user/assistant")
     user, assistant = messages
     if user.get("role") != "user" or assistant.get("role") != "assistant":
         raise ValueError(f"{record.get('id')}: messages 角色顺序必须是 user → assistant")
     assistant_content = str(assistant.get("content", ""))
+    # 标题是后续格式 Reward 和评测解析的共同契约，SFT 阶段不能丢失。
     if "## Thinking" not in assistant_content or "## Final Response" not in assistant_content:
         raise ValueError(f"{record.get('id')}: assistant 缺少 Huatuo 输出标题")
+    # 保留 id/source 只用于追踪；TRL 真正消费 prompt 和 completion 两列。
     return {
         "id": str(record["id"]),
         "source": str(record["source"]),
@@ -106,6 +119,7 @@ def verify_data_manifest(
     """在训练前重算 train/dev 哈希，禁止使用被替换过的数据。"""
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # aggregate SHA 先锁定整批数据版本，再逐文件重算 train/dev 哈希。
     actual_aggregate = str(manifest.get("aggregate_sha256", ""))
     if actual_aggregate != expected_aggregate_sha256:
         raise ValueError(
@@ -117,6 +131,7 @@ def verify_data_manifest(
         metadata = manifest.get("files", {}).get(key)
         if not isinstance(metadata, Mapping):
             raise ValueError(f"manifest 缺少 files.{key}")
+        # 同时检查路径与内容，防止误把另一份同名数据传给训练器。
         expected_path = (repo_root / str(metadata["path"])).resolve()
         if expected_path != path.resolve():
             raise ValueError(f"{key} 路径与 manifest 不一致：{path} != {expected_path}")
@@ -132,6 +147,8 @@ def verify_data_manifest(
 
 
 def _percentile(values: list[int], percentile: float) -> int:
+    """使用确定性的最近秩近似计算小规模长度分位数。"""
+
     if not values:
         return 0
     ordered = sorted(values)
@@ -140,6 +157,8 @@ def _percentile(values: list[int], percentile: float) -> int:
 
 
 def _common_prefix_length(left: list[int], right: list[int]) -> int:
+    """计算 prompt IDs 与完整对话 IDs 的公共前缀长度。"""
+
     length = 0
     for left_token, right_token in zip(left, right):
         if left_token != right_token:
@@ -157,6 +176,7 @@ def audit_token_boundaries(
 ) -> TokenAuditSummary:
     """模拟 TRL 的 prompt/completion 边界，证明 prompt 不参与 loss 且没有截断。"""
 
+    # 先统一成与 SFTTrainer 完全相同的 conversational prompt-completion 结构。
     prepared = [to_prompt_completion(record) for record in records]
     input_lengths: list[int] = []
     supervised_lengths: list[int] = []
@@ -165,14 +185,17 @@ def audit_token_boundaries(
     mismatch_rows = 0
     inspected: list[dict[str, Any]] = []
 
+    # 批量 tokenization 仅用于提高审计速度，不做 padding 或 truncation。
     for start in range(0, len(prepared), batch_size):
         batch = prepared[start : start + batch_size]
+        # prompt 末尾保留 assistant generation marker，正好是 completion 起点。
         prompt_texts = [
             tokenizer.apply_chat_template(
                 item["prompt"], tokenize=False, add_generation_prompt=True
             )
             for item in batch
         ]
+        # 完整文本包含真实 assistant 回答，用于验证 prompt 是否是严格前缀。
         full_texts = [
             tokenizer.apply_chat_template(
                 item["prompt"] + item["completion"],
@@ -199,6 +222,7 @@ def audit_token_boundaries(
         for item, one_prompt_ids, one_full_ids in zip(
             batch, prompt_ids, full_ids, strict=True
         ):
+            # TRL completion mask 在公共前缀处从 0 切换为 1。
             prefix_length = _common_prefix_length(one_prompt_ids, one_full_ids)
             supervised_length = len(one_full_ids) - prefix_length
             input_lengths.append(len(one_full_ids))
@@ -207,6 +231,7 @@ def audit_token_boundaries(
             empty_rows += int(supervised_length <= 0)
             mismatch_rows += int(prefix_length != len(one_prompt_ids))
             if len(inspected) < inspect_samples:
+                # 解码前 96 个监督 token，便于在报告中人工检查 mask 起点。
                 inspected.append(
                     {
                         "id": item["id"],
@@ -220,6 +245,7 @@ def audit_token_boundaries(
                     }
                 )
 
+    # 全量统计完成后统一构造报告，任何异常都作为训练前硬错误处理。
     summary = TokenAuditSummary(
         rows=len(records),
         min_input_tokens=min(input_lengths),

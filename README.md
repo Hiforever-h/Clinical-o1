@@ -11,8 +11,8 @@
 截至 2026-07-10：
 
 - M0/M1 已完成：工程骨架、英文 SFT/RL/评测数据、固定 revision、去重和 benchmark 污染报告均已落盘。
-- M2 Base 全量评测由项目负责人决定延期，未标记为完成；最终模型对比前仍需补跑。
-- M3 Stage 3 代码已实现并通过本地 19 项测试，等待 RTX 4090 服务器执行 `smoke → resume → pilot → full`。
+- M2 Base 全量评测代码和公平评测协议已实现，实际全量 Base run 按项目负责人决定延期；最终模型对比前仍需补跑。
+- M3 Stage 3 代码已实现；加入通用评测框架后项目共通过本地 29 项测试，等待 RTX 4090 服务器执行 `smoke → resume → pilot → full`。
 - GRPO/DAPO 尚未实现，必须在 SFT 训练及门禁完成后渐进落地。
 
 ## 冻结数据
@@ -42,6 +42,25 @@ clinical-o1 train-sft --profile full --run-id sft_full_seed42
 
 注意：`data/processed/` 不提交 Git。部署服务器时需上传本机已验收目录，或先执行 `clinical-o1 prepare-data` 从固定 revisions 重建；操作手册已包含该步骤。
 
+## Stage 2 评测入口
+
+评测器支持只跑 MedQA、MedMCQA 或 PubMedQA，也支持每个集合只跑固定前 N 题：
+
+```bash
+# 只检查 MedQA 前 20 题。
+clinical-o1 eval-dry-run --datasets medqa --max-samples 20
+
+# 只评测 MedQA 和 MedMCQA，每个集合前 100 题。
+clinical-o1 evaluate \
+  --model-type base \
+  --datasets medqa medmcqa \
+  --max-samples 100 \
+  --protocol both \
+  --run-id qwen25_7b_base_first100
+```
+
+完整命令、断点恢复和 Base/SFT 配对比较见 [Stage 2 评测操作手册](docs/stage2_base_evaluation.md)。
+
 ## 本地验收
 
 ```bash
@@ -59,6 +78,7 @@ clinical-o1 sft-dry-run --profile smoke
 - [PLAN.md](PLAN.md)：从数据到 DAPO 的唯一权威实施计划。
 - [Stage 3 配置](configs/sft/qwen25_7b_qlora_4090.yaml)：4090 单卡 QLoRA 的唯一参数源。
 - [RTX 4090 SFT 操作手册](docs/stage3_sft_4090.md)：环境安装、磁盘布局、smoke、断点恢复、pilot 和 full 命令。
+- [Stage 2 评测操作手册](docs/stage2_base_evaluation.md)：数据集选择、前 N 题、原子分片和 Base/adapter 公平比较。
 - [英文数据清单](data/manifests/english_mainline.json)：数据源 revision、划分、行数和 SHA256。
 - [污染报告](reports/data/contamination_report.md)：训练数据与最终 benchmark 的污染审计。
 - [数据质量报告](reports/data/data_quality_report.md)：schema、抽样和 token 长度统计。

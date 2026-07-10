@@ -178,7 +178,7 @@ Clinical-o1/
 
 ## 7. Stage 2：Base 全量评测基线（延期）
 
-项目负责人决定先执行 Stage 3，因此本阶段延期但不视为完成。进入 GRPO 前必须补齐同一模型 revision、同一 prompt 和同一答案解析协议下的 Base/SFT 对比，避免无法判断 SFT 是否真实退化。
+项目负责人决定先执行 Stage 3，因此实际 Base 全量 run 延期但不视为完成。评测代码、Prompt、解析器和公平比较 contract 已实现；进入 GRPO 前必须补齐同一模型 revision、同一 prompt 和同一答案解析协议下的 Base/SFT 对比，避免无法判断 SFT 是否真实退化。
 
 必须在 English SFT 前冻结 Base 结果，否则后续无法判断训练增益。
 
@@ -202,6 +202,21 @@ Clinical-o1/
 - 完整 MedQA 和 MedMCQA 结果成功落盘。
 - 同一配置重复运行结果一致。
 - 解析失败率低于 1%；否则先修评测协议，不进入 SFT。
+
+### 已实现工程能力
+
+- [x] MedQA、MedMCQA、PubMedQA 可单选、组合或使用 `all`。
+- [x] `--max-samples N` 对每个所选数据集固定取前 N 题，支持短程耗时评估。
+- [x] direct 与 Huatuo 两段式 cot 两套冻结 Prompt。
+- [x] 严格答案解析器，不从未锚定的 CoT 任意字母猜答案。
+- [x] Base BF16 与 BF16 Base + PEFT adapter 使用同一模型加载协议。
+- [x] 输入长度硬门禁，禁止静默截断。
+- [x] 64 题原子分片、断点恢复、ID/顺序/contract 校验。
+- [x] Accuracy、parsed accuracy、格式、长度、重复率、Wilson CI 和 macro-F1。
+- [x] contract 一致性门禁、配对 bootstrap 和 exact McNemar 比较。
+- [x] `eval-dry-run`、`evaluate`、`compare-eval` 统一 CLI。
+- [ ] RTX 4090 合成/小样本 GPU smoke。
+- [ ] Base 三个 benchmark direct/cot 全量 run。
 
 ## 8. Stage 3：English QLoRA SFT
 
@@ -233,7 +248,7 @@ Clinical-o1/
 - [x] smoke/pilot/full profile、最优 dev loss checkpoint、断点恢复和禁止覆盖 run。
 - [x] SFT 前后固定 greedy generation、格式/重复/打满长度诊断。
 - [x] 本地 JSONL、TensorBoard、resolved config、环境和最终 adapter 落盘。
-- [x] 19 项本地 Ruff/Pytest 验收通过。
+- [x] 加入 Stage 2 通用评测框架后，项目共 29 项本地 Ruff/Pytest 验收通过。
 - [ ] RTX 4090 smoke 前半程与 `checkpoint-5 → 10` 恢复实测。
 - [ ] pilot 与 full 训练实测。
 
@@ -451,7 +466,7 @@ reward_samples.jsonl
 | --- | --- | --- | --- |
 | M0 工程冻结 | 已完成 | artifact inventory、固定环境、测试骨架 | 历史 outputs 完整，CI/dry-run 通过 |
 | M1 数据闭环 | 已完成 | SFT/RL/eval 数据、manifest、污染报告 | schema 100% 合法，无已知评测污染 |
-| M2 Base 基线 | 已延期 | 完整 MedQA/MedMCQA Base 报告 | 进入 GRPO 前补齐，评测可复现、解析失败 < 1% |
+| M2 Base 基线 | 代码已完成、全量 run 延期 | 通用评测器、完整 MedQA/MedMCQA/PubMedQA Base 报告 | 进入 GRPO 前补齐，评测可复现、解析失败 < 1% |
 | M3 English SFT | 实现完成、待实跑 | 4090 配置/CLI/测试、full adapter、训练日志 | smoke 恢复、pilot、full 与 SFT 门禁通过 |
 | M4 PRM/Reward | 待执行 | PRM 数据、校准报告、Reward 测试 | 人工集验证通过，组内有方差 |
 | M5 GRPO | 待执行 | smoke/full checkpoint、稳定性曲线 | 至少两个 seed 同方向优于 SFT |

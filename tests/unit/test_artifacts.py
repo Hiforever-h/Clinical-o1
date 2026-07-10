@@ -1,3 +1,5 @@
+"""历史产物清单与目录树哈希的单元测试。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,6 +8,8 @@ from medical_grpo.tracking.artifacts import build_artifact_inventory
 
 
 def test_artifact_tree_digest_is_stable_and_content_sensitive(tmp_path: Path) -> None:
+    """相同文件树哈希应稳定，任一文件内容变化都必须改变树哈希。"""
+
     outputs = tmp_path / "outputs"
     outputs.mkdir()
     (outputs / "a.txt").write_text("alpha", encoding="utf-8")

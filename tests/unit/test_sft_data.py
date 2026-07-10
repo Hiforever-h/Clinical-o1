@@ -1,3 +1,5 @@
+"""SFT prompt-completion 转换和 token 边界审计的单元测试。"""
+
 from __future__ import annotations
 
 from medical_grpo.data.schema import build_sft_messages
@@ -13,6 +15,8 @@ class FakeChatTokenizer:
         tokenize: bool,
         add_generation_prompt: bool,
     ) -> str:
+        """生成可预测的 user 前缀和 assistant completion 边界。"""
+
         assert not tokenize
         text = ""
         for message in messages:
@@ -25,13 +29,19 @@ class FakeChatTokenizer:
         return text
 
     def __call__(self, texts: list[str], **_: object) -> dict[str, list[list[int]]]:
+        """把每个字符映射为唯一整数，避免引入真实 tokenizer 依赖。"""
+
         return {"input_ids": [[ord(character) for character in text] for text in texts]}
 
     def decode(self, token_ids: list[int], **_: object) -> str:
+        """把字符 ID 还原为文本，供 supervised_preview 断言。"""
+
         return "".join(chr(token_id) for token_id in token_ids)
 
 
 def _record() -> dict[str, object]:
+    """构造满足 Huatuo canonical schema 的最小单轮样本。"""
+
     return {
         "id": "sft-1",
         "source": "huatuo_o1_sft_en",
@@ -49,6 +59,8 @@ def _record() -> dict[str, object]:
 
 
 def test_prompt_completion_preserves_huatuo_headings() -> None:
+    """转换后必须保留角色、标题和 TRL 所需四列。"""
+
     prepared = to_prompt_completion(_record())
     dataset = build_hf_dataset([_record()])
 
@@ -59,6 +71,8 @@ def test_prompt_completion_preserves_huatuo_headings() -> None:
 
 
 def test_token_audit_proves_prompt_prefix_and_completion_tokens() -> None:
+    """监督边界应无错位、空 completion 或 max_length 截断。"""
+
     summary = audit_token_boundaries(
         [_record()],
         FakeChatTokenizer(),

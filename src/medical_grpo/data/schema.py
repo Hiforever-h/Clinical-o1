@@ -31,6 +31,8 @@ class MedicalMCQSample:
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为 JSONL 写入器可直接序列化的字典。"""
+
         return asdict(self)
 
 
@@ -48,6 +50,8 @@ class MedicalSFTSample:
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为 JSONL 写入器可直接序列化的字典。"""
+
         return asdict(self)
 
 
@@ -63,6 +67,8 @@ class MedicalRLPromptSample:
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为 JSONL 写入器可直接序列化的字典。"""
+
         return asdict(self)
 
 
@@ -73,6 +79,8 @@ def _text(value: Any) -> str:
 
 
 def _optional_text(value: Any) -> str | None:
+    """保留缺失值为 None，其余值统一清理为字符串。"""
+
     return None if value is None else _text(value)
 
 
@@ -87,6 +95,8 @@ def _meta(value: Any) -> dict[str, Any]:
 
 
 def _options(value: Any) -> dict[str, str]:
+    """把选择题选项键统一为大写并清理选项文本。"""
+
     if not isinstance(value, Mapping):
         return {}
     return {
@@ -107,6 +117,8 @@ def build_sft_messages(question: str, reasoning: str, response: str) -> list[dic
 
 
 def _messages(value: Any) -> list[dict[str, str]]:
+    """从外部数据中提取 role/content，丢弃未知附加字段。"""
+
     if not isinstance(value, list):
         return []
     messages: list[dict[str, str]] = []
@@ -139,6 +151,8 @@ def _common_errors(
 
 
 def normalize_mcq_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """把不同来源的选择题记录规范化为统一字段和值类型。"""
+
     options = _options(record.get("options", {}))
     answer = _text(record.get("answer", "")).upper()
     answer_text = _optional_text(record.get("answer_text"))
@@ -158,6 +172,8 @@ def normalize_mcq_record(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_mcq_record(record: Mapping[str, Any]) -> list[str]:
+    """返回选择题的全部 schema 错误，不在首个错误处提前退出。"""
+
     errors = _common_errors(record, MCQ_REQUIRED_FIELDS, "question")
     options = _options(record.get("options", {}))
     if len(options) < 2:
@@ -174,6 +190,8 @@ def validate_mcq_record(record: Mapping[str, Any]) -> list[str]:
 
 
 def to_mcq_sample(record: Mapping[str, Any]) -> MedicalMCQSample:
+    """规范化并校验选择题，成功后构造强类型样本。"""
+
     normalized = normalize_mcq_record(record)
     errors = validate_mcq_record(normalized)
     if errors:
@@ -182,6 +200,8 @@ def to_mcq_sample(record: Mapping[str, Any]) -> MedicalMCQSample:
 
 
 def normalize_sft_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """规范化 SFT 字段，并在缺少 messages 时按 Huatuo 格式补建。"""
+
     question = _text(record.get("question", ""))
     reasoning = _text(record.get("reasoning", ""))
     response = _text(record.get("response", ""))
@@ -201,6 +221,8 @@ def normalize_sft_record(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_sft_record(record: Mapping[str, Any]) -> list[str]:
+    """检查 SFT 推理、回答和 user/assistant 对话结构。"""
+
     errors = _common_errors(record, SFT_REQUIRED_FIELDS, "question")
     if not _text(record.get("reasoning", "")):
         errors.append("reasoning must be a non-empty string")
@@ -220,6 +242,8 @@ def validate_sft_record(record: Mapping[str, Any]) -> list[str]:
 
 
 def to_sft_sample(record: Mapping[str, Any]) -> MedicalSFTSample:
+    """规范化并校验 SFT 记录，成功后构造强类型样本。"""
+
     normalized = normalize_sft_record(record)
     errors = validate_sft_record(normalized)
     if errors:
@@ -228,6 +252,8 @@ def to_sft_sample(record: Mapping[str, Any]) -> MedicalSFTSample:
 
 
 def normalize_rl_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """规范化 RL prompt、可验证答案、split 与 provenance。"""
+
     return {
         "id": _text(record.get("id", "")),
         "source": _text(record.get("source", "")),
@@ -239,6 +265,8 @@ def normalize_rl_record(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_rl_record(record: Mapping[str, Any]) -> list[str]:
+    """检查 RL prompt 与 ground-truth answer 是否完整。"""
+
     errors = _common_errors(record, RL_REQUIRED_FIELDS, "prompt")
     if not _text(record.get("ground_truth_answer", "")):
         errors.append("ground_truth_answer must be a non-empty string")
@@ -246,6 +274,8 @@ def validate_rl_record(record: Mapping[str, Any]) -> list[str]:
 
 
 def to_rl_sample(record: Mapping[str, Any]) -> MedicalRLPromptSample:
+    """规范化并校验 RL 记录，成功后构造强类型样本。"""
+
     normalized = normalize_rl_record(record)
     errors = validate_rl_record(normalized)
     if errors:

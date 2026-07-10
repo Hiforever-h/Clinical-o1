@@ -8,13 +8,16 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from medical_grpo.paths import find_repo_root
 from medical_grpo.tracking.artifacts import write_artifact_inventory
 
 
+# 所有 SFT 子命令默认读取同一份 4090 基线，避免 CLI 与文档参数分叉。
 DEFAULT_SFT_CONFIG = Path("configs/sft/qwen25_7b_qlora_4090.yaml")
+# Stage 2 与所有后续模型共用这一份评测合同配置。
+DEFAULT_EVAL_CONFIG = Path("configs/evaluation/qwen25_7b_mcq_4090.yaml")
 
 
 def _add_inventory_command(subparsers: argparse._SubParsersAction) -> None:
@@ -78,6 +81,7 @@ def _add_sft_dry_run_command(subparsers: argparse._SubParsersAction) -> None:
         "sft-dry-run",
         help="校验英文 SFT 数据哈希、token 边界和 TRL 参数映射。",
     )
+    # dry-run 支持缩小样本数，但默认按所选 profile 审计对应数据规模。
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=DEFAULT_SFT_CONFIG)
     parser.add_argument("--profile", choices=("smoke", "pilot", "full"), default="full")
@@ -94,6 +98,7 @@ def _add_train_sft_command(subparsers: argparse._SubParsersAction) -> None:
         "train-sft",
         help="执行 smoke、pilot 或 full 单卡 QLoRA SFT。",
     )
+    # profile 必须显式选择，防止无意间直接启动成本最高的 full run。
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=DEFAULT_SFT_CONFIG)
     parser.add_argument("--profile", choices=("smoke", "pilot", "full"), required=True)
@@ -101,6 +106,7 @@ def _add_train_sft_command(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-eval-samples", type=int, default=None)
+    # 样本/步数覆盖主要服务 smoke 与故障定位，正式 full 使用 YAML 默认值。
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument(
         "--resume-from-checkpoint",
@@ -121,10 +127,87 @@ def _add_train_sft_command(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(command_func=_run_train_sft)
 
 
+def _add_eval_dry_run_command(subparsers: argparse._SubParsersAction) -> None:
+    """注册不加载 7B 权重的评测合同检查命令。"""
+
+    parser = subparsers.add_parser(
+        "eval-dry-run",
+        help="检查所选 benchmark、前 N 题、Prompt、解析器和输入 token 长度。",
+    )
+    parser.add_argument("--repo-root", type=Path, default=None)
+    parser.add_argument("--config", type=Path, default=DEFAULT_EVAL_CONFIG)
+    parser.add_argument("--profile", choices=("smoke", "full"), default="full")
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["all"],
+        help="可选 all、medqa、medmcqa、pubmedqa；多个名称用空格或逗号分隔。",
+    )
+    parser.add_argument("--protocol", choices=("direct", "cot", "both"), default="both")
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="每个被选数据集只取固定前 N 题；不传则使用 profile 默认值。",
+    )
+    parser.add_argument("--output", type=Path, default=None)
+    parser.set_defaults(command_func=_run_eval_dry_run)
+
+
+def _add_evaluate_command(subparsers: argparse._SubParsersAction) -> None:
+    """注册 Base 或 LoRA adapter 的正式 GPU 评测命令。"""
+
+    parser = subparsers.add_parser(
+        "evaluate",
+        help="在所选 benchmark 的全部或前 N 题上执行可恢复评测。",
+    )
+    parser.add_argument("--repo-root", type=Path, default=None)
+    parser.add_argument("--config", type=Path, default=DEFAULT_EVAL_CONFIG)
+    parser.add_argument("--profile", choices=("smoke", "full"), default="full")
+    parser.add_argument("--model-type", choices=("base", "adapter"), required=True)
+    parser.add_argument("--adapter-path", type=Path, default=None)
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["all"],
+        help="可选 all、medqa、medmcqa、pubmedqa；多个名称用空格或逗号分隔。",
+    )
+    parser.add_argument("--protocol", choices=("direct", "cot", "both"), default="both")
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="每个被选数据集只评测固定前 N 题。",
+    )
+    parser.add_argument("--run-id", type=str, default=None)
+    parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument("--resume", action="store_true", help="恢复同一 run 中已完成的原子分片。")
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="仅调试时允许未提交代码；正式评测不要使用。",
+    )
+    parser.set_defaults(command_func=_run_evaluate)
+
+
+def _add_compare_eval_command(subparsers: argparse._SubParsersAction) -> None:
+    """注册两个相同 contract 评测 run 的配对比较命令。"""
+
+    parser = subparsers.add_parser(
+        "compare-eval",
+        help="比较 Base 与候选模型的逐题正确性变化和 McNemar 统计。",
+    )
+    parser.add_argument("--baseline", type=Path, required=True)
+    parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.set_defaults(command_func=_run_compare_eval)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造顶层解析器；子命令必须显式指定。"""
 
     parser = argparse.ArgumentParser(prog="clinical-o1", description=__doc__)
+    # required=True 可避免用户漏写子命令时静默退出或执行错误默认操作。
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_inventory_command(subparsers)
     _add_prepare_data_command(subparsers)
@@ -132,6 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_snapshot_command(subparsers)
     _add_sft_dry_run_command(subparsers)
     _add_train_sft_command(subparsers)
+    _add_eval_dry_run_command(subparsers)
+    _add_evaluate_command(subparsers)
+    _add_compare_eval_command(subparsers)
     return parser
 
 
@@ -213,6 +299,7 @@ def _run_sft_dry_run(args: argparse.Namespace) -> int:
     from medical_grpo.sft.config import load_sft_config
     from medical_grpo.sft.dry_run import run_sft_dry_run, write_dry_run_report
 
+    # 延迟导入 SFT 依赖，使 M0/M1 基础命令不强制安装完整训练栈。
     repo_root = (args.repo_root or find_repo_root()).resolve()
     config_path = _resolve_cli_path(repo_root, args.config)
     config = load_sft_config(config_path, profile=args.profile)
@@ -222,6 +309,7 @@ def _run_sft_dry_run(args: argparse.Namespace) -> int:
         max_train_samples=args.max_train_samples,
         max_eval_samples=args.max_eval_samples,
     )
+    # 报告完整落盘，终端只打印最关键的行数、长度和 label mask 结果。
     output = args.output or Path(f"reports/sft/{args.profile}_dry_run.json")
     output = _resolve_cli_path(repo_root, output)
     write_dry_run_report(output, report)
@@ -251,6 +339,7 @@ def _run_train_sft(args: argparse.Namespace) -> int:
     from medical_grpo.sft.config import load_sft_config
     from medical_grpo.sft.trainer import TrainOverrides, run_sft_training
 
+    # 在真正执行子命令前才导入 TRL/PEFT，普通数据命令可保持轻量启动。
     repo_root = (args.repo_root or find_repo_root()).resolve()
     config_path = _resolve_cli_path(repo_root, args.config)
     output_root = (
@@ -259,6 +348,7 @@ def _run_train_sft(args: argparse.Namespace) -> int:
         else None
     )
     config = load_sft_config(config_path, profile=args.profile)
+    # CLI 参数先封装为不可变 overrides，训练编排统一负责合法性校验。
     result = run_sft_training(
         config,
         repo_root,
@@ -274,6 +364,102 @@ def _run_train_sft(args: argparse.Namespace) -> int:
         ),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _resolve_eval_selection(args: argparse.Namespace, config: Any) -> tuple[tuple[str, ...], tuple[str, ...], int | None]:
+    """统一解析数据集、协议和每数据集前 N 题限制。"""
+
+    from medical_grpo.evaluation.config import (
+        normalize_dataset_selection,
+        normalize_protocol_selection,
+        resolve_max_samples,
+    )
+
+    datasets = normalize_dataset_selection(args.datasets)
+    protocols = normalize_protocol_selection(args.protocol)
+    max_samples = resolve_max_samples(config, args.max_samples)
+    return datasets, protocols, max_samples
+
+
+def _run_eval_dry_run(args: argparse.Namespace) -> int:
+    """执行评测数据、Prompt、解析器和输入长度的 CPU dry-run。"""
+
+    from medical_grpo.evaluation.config import load_evaluation_config
+    from medical_grpo.evaluation.dry_run import run_evaluation_dry_run, write_evaluation_dry_run
+
+    repo_root = (args.repo_root or find_repo_root()).resolve()
+    config = load_evaluation_config(_resolve_cli_path(repo_root, args.config), profile=args.profile)
+    datasets, protocols, max_samples = _resolve_eval_selection(args, config)
+    report = run_evaluation_dry_run(config, repo_root, datasets, protocols, max_samples)
+    dataset_label = "-".join(datasets)
+    limit_label = f"n{max_samples}" if max_samples is not None else "all"
+    output = args.output or Path(
+        f"reports/evaluation/{args.profile}_{dataset_label}_{args.protocol}_{limit_label}_dry_run.json"
+    )
+    output = _resolve_cli_path(repo_root, output)
+    write_evaluation_dry_run(output, report)
+    print(
+        f"Eval dry-run: datasets={','.join(datasets)} protocols={','.join(protocols)} "
+        f"max_samples_per_dataset={max_samples} predictions={report['total_predictions']}"
+    )
+    print(f"Contract: {report['evaluation_contract']['evaluation_contract_sha256']}")
+    print(f"Report: {output}")
+    return 0
+
+
+def _run_evaluate(args: argparse.Namespace) -> int:
+    """延迟加载 GPU 依赖并执行 Base/adapter 正式评测。"""
+
+    from medical_grpo.evaluation.config import load_evaluation_config
+    from medical_grpo.evaluation.runner import EvaluationOverrides, run_evaluation
+
+    repo_root = (args.repo_root or find_repo_root()).resolve()
+    config = load_evaluation_config(_resolve_cli_path(repo_root, args.config), profile=args.profile)
+    datasets, protocols, max_samples = _resolve_eval_selection(args, config)
+    adapter_path = (
+        _resolve_cli_path(repo_root, args.adapter_path)
+        if args.adapter_path is not None
+        else None
+    )
+    output_root = (
+        _resolve_cli_path(repo_root, args.output_root)
+        if args.output_root is not None
+        else None
+    )
+    result = run_evaluation(
+        config,
+        repo_root,
+        EvaluationOverrides(
+            model_type=args.model_type,
+            adapter_path=adapter_path,
+            selected_datasets=datasets,
+            selected_protocols=protocols,
+            max_samples_per_dataset=max_samples,
+            run_id=args.run_id,
+            output_root=output_root,
+            resume=args.resume,
+            allow_dirty=args.allow_dirty,
+        ),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_compare_eval(args: argparse.Namespace) -> int:
+    """执行相同 contract 的 Base/候选模型配对比较。"""
+
+    from medical_grpo.evaluation.compare import compare_evaluation_runs, write_comparison
+
+    repo_root = find_repo_root()
+    baseline = _resolve_cli_path(repo_root, args.baseline)
+    candidate = _resolve_cli_path(repo_root, args.candidate)
+    report = compare_evaluation_runs(baseline, candidate)
+    output = args.output or candidate / "comparison_to_baseline.json"
+    output = _resolve_cli_path(repo_root, output)
+    write_comparison(output, report)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(f"Comparison report: {output}")
     return 0
 
 

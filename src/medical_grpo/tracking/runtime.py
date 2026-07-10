@@ -14,6 +14,7 @@ from typing import Any
 import torch
 
 
+# 覆盖数据、SFT、量化、日志所需依赖；缺失的阶段性可选包记录为 null。
 TRACKED_PACKAGES = (
     "accelerate",
     "bitsandbytes",
@@ -24,6 +25,7 @@ TRACKED_PACKAGES = (
     "pyyaml",
     "safetensors",
     "scikit-learn",
+    "scipy",
     "tensorboard",
     "torch",
     "transformers",
@@ -60,8 +62,10 @@ def build_runtime_snapshot(repo_root: Path) -> dict[str, Any]:
     """收集 Python、依赖、加速器和非破坏性的 Git 状态。"""
 
     repo_root = repo_root.resolve()
+    # 同一个快照同时兼容本地 MPS/CPU dry-run 与服务器 CUDA 正式训练。
     cuda_available = torch.cuda.is_available()
     devices = [torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())]
+    # 保存 dirty 文件清单，避免只记录 commit 却遗漏未提交实验代码。
     status = _git(repo_root, "status", "--short") or ""
     return {
         "schema_version": 1,
@@ -99,6 +103,7 @@ def write_runtime_snapshot(repo_root: Path, destination: Path) -> dict[str, Any]
     """原子写入运行环境快照，供每个 run 目录复用。"""
 
     snapshot = build_runtime_snapshot(repo_root)
+    # 临时文件与目标位于同一目录，replace 在常见文件系统上可原子完成。
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
