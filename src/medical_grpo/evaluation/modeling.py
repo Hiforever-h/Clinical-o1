@@ -6,7 +6,7 @@ from hashlib import sha256
 import os
 from pathlib import Path
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from medical_grpo.evaluation.config import EvaluationConfig, ProtocolSpec
 from medical_grpo.evaluation.metrics import repetition_ratio
@@ -159,8 +159,13 @@ def generate_batch_predictions(
     max_input_length: int,
     contract_sha256: str,
     batch_id_start: int,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """按固定 batch size 做 greedy generation，并生成完整逐题审计记录。"""
+    """按固定 batch size 做 greedy generation，并生成完整逐题审计记录。
+
+    progress_callback 由运行编排层传入，每完成一个 batch 后按实际题数更新进度条。
+    这里不直接依赖 tqdm，便于在测试或其他调用场景中替换进度展示方式。
+    """
 
     import torch
 
@@ -249,4 +254,7 @@ def generate_batch_predictions(
                     "meta": dict(record.get("meta", {})),
                 }
             )
+        # 必须在当前 batch 的所有预测均完成解析和记录构造后再推进，避免进度领先于实际结果。
+        if progress_callback is not None:
+            progress_callback(len(batch_records))
     return predictions

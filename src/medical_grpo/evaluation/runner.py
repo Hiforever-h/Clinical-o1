@@ -157,6 +157,7 @@ def run_evaluation(
     """执行 Base/adapter 评测，并生成可恢复、可配对比较的完整 run。"""
 
     import torch
+    from tqdm.auto import tqdm
 
     repo_root = repo_root.resolve()
     if config.runtime.require_clean_git and not overrides.allow_dirty and _git_is_dirty(repo_root):
@@ -239,27 +240,38 @@ def run_evaluation(
             protocol = config.protocols[protocol_name]
             shard_dir = run_dir / "shards" / dataset_name / protocol_name
             shard_paths: list[Path] = []
-            for shard_start in range(0, len(records), config.inference.shard_size):
-                shard_records = records[shard_start : shard_start + config.inference.shard_size]
-                shard_path = shard_dir / f"{shard_start:08d}.jsonl"
-                shard_paths.append(shard_path)
-                if shard_path.is_file():
-                    if not overrides.resume:
-                        raise FileExistsError(f"新 run 中意外存在分片：{shard_path}")
-                    _validate_existing_shard(shard_path, shard_records, contract_sha256)
-                    continue
-                predictions = generate_batch_predictions(
-                    model,
-                    tokenizer,
-                    shard_records,
-                    dataset_name,
-                    protocol_name,
-                    protocol,
-                    config.inference.max_input_length,
-                    contract_sha256,
-                    batch_id_start=shard_start // protocol.batch_size,
-                )
-                _write_jsonl(shard_path, predictions)
+            # 每个“数据集/协议”独立显示题目级进度；实际更新粒度等于该协议的 batch size。
+            progress_description = f"评测 {dataset_name}/{protocol_name}"
+            with tqdm(
+                total=len(records),
+                desc=progress_description,
+                unit="题",
+                dynamic_ncols=True,
+            ) as progress_bar:
+                for shard_start in range(0, len(records), config.inference.shard_size):
+                    shard_records = records[shard_start : shard_start + config.inference.shard_size]
+                    shard_path = shard_dir / f"{shard_start:08d}.jsonl"
+                    shard_paths.append(shard_path)
+                    if shard_path.is_file():
+                        if not overrides.resume:
+                            raise FileExistsError(f"新 run 中意外存在分片：{shard_path}")
+                        _validate_existing_shard(shard_path, shard_records, contract_sha256)
+                        # 恢复时已验证的完整分片无需重新生成，但要计入本次显示的完成进度。
+                        progress_bar.update(len(shard_records))
+                        continue
+                    predictions = generate_batch_predictions(
+                        model,
+                        tokenizer,
+                        shard_records,
+                        dataset_name,
+                        protocol_name,
+                        protocol,
+                        config.inference.max_input_length,
+                        contract_sha256,
+                        batch_id_start=shard_start // protocol.batch_size,
+                        progress_callback=progress_bar.update,
+                    )
+                    _write_jsonl(shard_path, predictions)
 
             prediction_path = run_dir / "predictions" / f"{dataset_name}_{protocol_name}.jsonl"
             merged = _merge_predictions(
